@@ -1,0 +1,9 @@
+{
+  "extends": "solhint:recommended",
+  "rules": {
+    "custom-errors": "off",
+    "max-states-count": ["warn",16],
+    "reason-string": ["warn", {"maxLength": 128}],
+    "func-visibility": ["warn", {"ignoreConstructors":true}]
+  }
+}
