@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { Contract, ZeroAddress, parseUnits } from "ethers";
+import { Contract, ZeroAddress, parseUnits, MaxUint256 } from "ethers";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 import { roles } from "./helpers/constants";
@@ -338,18 +338,19 @@ describe("YBS Access Controlled Token", function () {
 
     it("can set the rebase multiplier with rebase-admin role", async () => {
       const { contract, addr1 } = await loadFixture(deployYBSFixture);
-      const base = parseUnits("1");
+      const nextMult = parseUnits("1.0001");
       await contract.grantRole(roles.REBASE_ADMIN_ROLE, addr1.address);
 
       await expect(
-        (contract.connect(addr1) as Contract).setRebaseMultipliers(base, base, 0, parseUnits("99"))).to.not.be.reverted;
+        (contract.connect(addr1) as Contract).setNextMultiplier(nextMult, MaxUint256, parseUnits("99"))).to.not.be.reverted;
     });
 
     it("cannot set the rebase multiplier without rebase-admin role", async () => {
       const { contract, addr1 } = await loadFixture(deployYBSFixture);
+      const nextMult = parseUnits("1.0001");
 
       await expect(
-        (contract.connect(addr1) as Contract).setRebaseMultipliers(1, 1, 0, 0)
+        (contract.connect(addr1) as Contract).setNextMultiplier(nextMult, MaxUint256, 0)
       ).to.be.revertedWith(
         `AccessControl: account ${addr1.address.toLowerCase()} is missing role ${
           roles.REBASE_ADMIN_ROLE

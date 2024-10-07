@@ -1,16 +1,15 @@
 const { ethers, upgrades } = require("hardhat");
 const { getImplementationAddress } = require('@openzeppelin/upgrades-core');
+const { ValidateInitializerArgs } = require('../utils/helpers');
 
 require("dotenv").config();
 
-const { ADMIN_ADDRESS, SUPPLY_CONTROLLER, PAUSER, ASSET_PROTECTOR, REBASER_ADMIN, REBASER } = process.env;
-const contractName = 'Phase Zero';
-const contractSymbol = 'USDX';
+const { YBS_CONTRACT_NAME, YBS_CONTRACT_SYMBOL, ADMIN_ADDRESS, SUPPLY_CONTROLLER, PAUSER, ASSET_PROTECTOR, REBASER_ADMIN, REBASER } = process.env;
 const contractDecimals = 18;
 
 const initializerArgs = [
-  contractName,
-  contractSymbol,
+  YBS_CONTRACT_NAME,
+  YBS_CONTRACT_SYMBOL,
   contractDecimals,
   ADMIN_ADDRESS,
   SUPPLY_CONTROLLER,
@@ -21,6 +20,8 @@ const initializerArgs = [
 ];
 
 const main = async () => {
+  ValidateInitializerArgs(initializerArgs);
+
   const [deployer] = await ethers.getSigners();
 
   console.log('Deployer: %s', await deployer.getAddress());
@@ -40,8 +41,8 @@ const main = async () => {
 
   await contract.waitForDeployment();
 
-  console.log('%s contract proxy address: %s', contractSymbol, contract.target);
-  console.log('%s implementation address: %s', contractSymbol, await getImplementationAddress(ethers.provider, contract.target))
+  console.log('%s contract proxy address: %s', YBS_CONTRACT_SYMBOL, contract.target);
+  console.log('%s implementation address: %s', YBS_CONTRACT_SYMBOL, await getImplementationAddress(ethers.provider, contract.target))
 };
 
 main()

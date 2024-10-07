@@ -6,6 +6,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/security/
 /**
  * @dev PaxosBaseAbstract
  * An abstract contract for Paxos tokens with additional internal functions.
+ * @custom:security-contact smart-contract-security@paxos.com
  */
 abstract contract PaxosBaseAbstract is PausableUpgradeable {
     function _approve(

@@ -6,6 +6,7 @@ import {ECRecover} from "./ECRecover.sol";
 /**
  * @title EIP712
  * @notice A library that provides EIP712 helper functions
+ * @custom:security-contact smart-contract-security@paxos.com
  */
 library EIP712 {
     // keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
@@ -28,7 +29,7 @@ library EIP712 {
                     EIP712_DOMAIN_TYPEHASH,
                     keccak256(bytes(name)),
                     keccak256(bytes(version)),
-                    bytes32(block.chainid),
+                    block.chainid,
                     address(this)
                 )
             );

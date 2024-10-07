@@ -1,10 +1,10 @@
 import { expect } from "chai";
 import { ethers, network, upgrades } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { parseUnits } from "ethers";
-import { fail } from "assert";
+import { parseUnits, MaxUint256 } from "ethers";
 
 import { CONTRACT_NAME } from "./helpers/constants";
+import { getBlockTimestamp } from "./helpers/commonutil";
 
 describe("YBS Rebasing Token", function () {
   const name = "Yield Bearing Stablecoin";
@@ -41,26 +41,15 @@ describe("YBS Rebasing Token", function () {
     return { contract, admin, addr1, addr2 };
   }
 
-  async function getBlockTimestamp() {
-    const blockNumber = await ethers.provider.getBlockNumber();
-    const block = await ethers.provider.getBlock(blockNumber);
-
-    if (block) {
-      return block.timestamp;
-    } else {
-      fail("Error: Unable to retrieve block information");
-    }
-  }
-
   describe("Rebasing", () => {
     const base = parseUnits("1");
-    const beforeIncrMult = parseUnits("1.0001");
+    const wei = parseUnits("0.000000000000000001");
     const afterIncrMult = parseUnits("1.0002");
+    const newAfterIncrMult = parseUnits("1.0003");
     const rebaseRate = parseUnits("0.2");
-    const effectTime = 123;
     const amount = parseUnits("123");
     const afterIncrTotalSupply = (totalSupply * (afterIncrMult) / base);
-    const beforeIncrTotalSupply = (totalSupply * (beforeIncrMult) / base);
+    const newAfterIncrTotalSupply = (totalSupply * (newAfterIncrMult) / base);
 
     // calculate refreshed multiplier when increasing rebase shares.
     function calculateAfterIncrMult(totalRebaseShares: bigint, beforeIncrMult: bigint, afterIncrMult: bigint, mintValue: bigint) {
@@ -72,105 +61,91 @@ describe("YBS Rebasing Token", function () {
     it("sets beforeIncrMult, afterIncrMult and increase time", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
 
-      await expect(contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, effectTime, afterIncrTotalSupply))
+      await expect(contract.setNextMultiplier(afterIncrMult, MaxUint256, afterIncrTotalSupply))
         .to.emit(contract, "RebaseMultipliersSet")
-        .withArgs(beforeIncrMult, afterIncrMult, effectTime);
-    });
-
-    it("reverts if beforeIncrMult is below base", async () => {
-      const { contract } = await loadFixture(deployYBSFixture);
-
-      const invalidMultiplier = base - parseUnits("1", -18); // 1e-18 below base
-
-      await expect(contract.setRebaseMultipliers(invalidMultiplier, base, 0, totalSupply))
-        .to.be.revertedWithCustomError(contract, "InvalidRebaseMultiplier")
-        .withArgs(invalidMultiplier);
-    });
-
-    it("reverts if afterIncrMult is below base", async () => {
-      const { contract } = await loadFixture(deployYBSFixture);
-
-      const invalidMultiplier = base - parseUnits("1", -18); // 1e-18 below base
-
-      await expect(contract.setRebaseMultipliers(base, invalidMultiplier, 0, afterIncrTotalSupply))
-        .to.be.revertedWithCustomError(contract, "InvalidRebaseMultiplier")
-        .withArgs(invalidMultiplier);
+        .withArgs(base, afterIncrMult, MaxUint256);
     });
 
     it("reverts if afterIncrMult is less than beforeIncrMult", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
 
-      await expect(contract.setRebaseMultipliers(afterIncrMult, beforeIncrMult, 0, totalSupply))
+      const invalidMultiplier = base - parseUnits("1", -18); // 1e-18 below base
+
+      await expect(contract.setNextMultiplier(invalidMultiplier, MaxUint256, afterIncrTotalSupply))
         .to.be.revertedWithCustomError(contract, "InvalidRebaseMultiplier")
-        .withArgs(beforeIncrMult);
+        .withArgs(invalidMultiplier);
     });
 
-    it("setting beforeIncrMult while active updates total supply", async () => {
+    it("reverts setNextMultiplier if retroactive rebase", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
 
-      expect(await contract.totalSupply()).to.equal(totalSupply);
-
-      const currentBlockTimestamp = await getBlockTimestamp();
-      await contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, currentBlockTimestamp + 10, afterIncrTotalSupply);
-
-      const expected = (totalSupply * beforeIncrMult) / base;
-
-      expect(await contract.totalSupply()).to.equal(expected);
+      await expect(contract.setNextMultiplier(afterIncrMult, 0, totalSupply))
+        .to.be.revertedWithCustomError(contract, "RetroactiveRebase");
     });
 
-    it("setting afterIncrMult while active updates total supply", async () => {
+    it("reverts increaseRebaseMultiplier if retroactive rebase", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
 
+      const expectedTotalSupply = totalSupply * (base + rebaseRate) / base;
+      await expect(contract.increaseRebaseMultiplier(rebaseRate, expectedTotalSupply))
+        .to.be.revertedWithCustomError(contract, "RetroactiveRebase");
+    });
+
+    it("allows correcting pending multiplier", async () => {
+      const { contract } = await loadFixture(deployYBSFixture);
+
+      await contract.setNextMultiplier(afterIncrMult, MaxUint256, afterIncrTotalSupply);
       expect(await contract.totalSupply()).to.equal(totalSupply);
 
-      await contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, 0, afterIncrTotalSupply);
+      // correct the pending multiplier
+      const effectTime = await getBlockTimestamp() + 10;
+      await contract.setNextMultiplier(newAfterIncrMult, effectTime, newAfterIncrTotalSupply);
 
-      const expected = (totalSupply * afterIncrMult) / base;
-
-      expect(await contract.totalSupply()).to.equal(expected);
+      // beforeIncrMult should still be active, expect no supply change
+      expect(await contract.totalSupply()).to.equal(totalSupply); 
     });
 
     it("a rebaseRate of zero increases multIncrTime, does not change active multiplier", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
 
-      let currentBlockTimestamp = await getBlockTimestamp();
-
-      await contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, currentBlockTimestamp, afterIncrTotalSupply);
-
-      const activeMult = await contract.getActiveMultiplier();
+      let effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
 
       await expect(contract.increaseRebaseMultiplier(0, afterIncrTotalSupply))
         .to.emit(contract, "RebaseMultipliersSet")
-        .withArgs(afterIncrMult, afterIncrMult, currentBlockTimestamp + rebasePeriod);
+        .withArgs(afterIncrMult, afterIncrMult, effectTime + rebasePeriod);
 
-      expect(await contract.multIncrTime()).to.greaterThan(currentBlockTimestamp);
-      expect(await contract.getActiveMultiplier()).to.equal(activeMult);
+      expect(await contract.multIncrTime()).to.greaterThan(effectTime);
+      expect(await contract.getActiveMultiplier()).to.equal(afterIncrMult);
 
       // Simulate time passing
-      await network.provider.send("evm_increaseTime", [rebasePeriod-1]);
+      await network.provider.send("evm_increaseTime", [rebasePeriod]);
       await network.provider.send("evm_mine");
 
-      currentBlockTimestamp = await getBlockTimestamp();
+      let currentBlockTimestamp = await getBlockTimestamp();
       expect(await contract.multIncrTime()).to.lessThan(currentBlockTimestamp);
 
       // Ensure active multiplier is the same after the rebase event
-      expect(await contract.getActiveMultiplier()).to.equal(activeMult);
+      expect(await contract.getActiveMultiplier()).to.equal(afterIncrMult);
     });
 
     it("reverts if next multiplier is already set", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
 
       const currentBlockTimestamp = await getBlockTimestamp();
-      await contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, currentBlockTimestamp + 10, afterIncrTotalSupply);
+      await contract.setNextMultiplier(afterIncrMult, currentBlockTimestamp + 10, afterIncrTotalSupply);
       await expect(contract.increaseRebaseMultiplier(rebaseRate, afterIncrTotalSupply))
         .to.be.revertedWithCustomError(contract, "NextIncreaseAlreadySet");
     });
-
     
     it("reverts increaseRebaseMultiplier after increasing supply", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
       const rebaseRate = parseUnits("0.0004");
-      const expectedTotalSupply = totalSupply * (base + rebaseRate) / base;
+      const nextMult = (base + rebaseRate) / base;
+      const expectedTotalSupply = totalSupply * nextMult / base;
+
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
 
       // Increase the supply for race condition.
       await contract.increaseSupply(base);
@@ -183,10 +158,10 @@ describe("YBS Rebasing Token", function () {
       await network.provider.send("evm_mine");
 
       // Check the total supply is same as expected, original + increaseSupply.
-      expect(await contract.totalSupply()).to.be.equal(totalSupply + base);
+      expect(await contract.totalSupply()).to.be.within(afterIncrTotalSupply + base - wei, afterIncrTotalSupply + base);
     });
 
-    it("reverts setRebaseMultipliers after increasing supply", async () => {
+    it("reverts setNextMultiplier after increasing supply", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
       const beforeIncrMult = base;
       const rebaseRate = parseUnits("0.001");
@@ -200,7 +175,7 @@ describe("YBS Rebasing Token", function () {
       // Increase the supply for race condition.
       await contract.increaseSupply(base);
 
-      await expect(contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, multIncrTime, expectedTotalSupply))
+      await expect(contract.setNextMultiplier(afterIncrMult, multIncrTime, expectedTotalSupply))
         .to.be.revertedWithCustomError(contract, "UnexpectedTotalSupply");
 
       // Simulate time passing
@@ -213,14 +188,21 @@ describe("YBS Rebasing Token", function () {
 
     it("increase rebase multiplier emits beforeIncrMult afterIncrMult and increase time", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
+      
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(base, effectTime, totalSupply);
+      
       const rebaseMultiplier = await contract.getActiveMultiplier();
-
       const afterIncrMult = rebaseMultiplier * (base + rebaseRate) / base;
       const expectedTotalSupply = totalSupply * (base + rebaseRate) / base;
 
       await expect(contract.increaseRebaseMultiplier(rebaseRate, expectedTotalSupply))
         .to.emit(contract, "RebaseMultipliersSet")
-        .withArgs(base, afterIncrMult, 10);
+        .withArgs(base, afterIncrMult, effectTime+rebasePeriod);
+
+      // Simulate time passing
+      await network.provider.send("evm_increaseTime", [rebasePeriod-1]);
+      await network.provider.send("evm_mine");
 
       expect(await contract.getActiveMultiplier()).to.equal(afterIncrMult);
     });
@@ -230,8 +212,8 @@ describe("YBS Rebasing Token", function () {
 
       await contract.transfer(addr1.address, amount);
 
-      const currentBlockTimestamp = await getBlockTimestamp();
-      await contract.setRebaseMultipliers(base, base, currentBlockTimestamp, totalSupply);
+      const effectTime = await getBlockTimestamp() + 10;
+      await contract.setRebasePeriod(effectTime);
 
       const expectedTotalSupply = totalSupply * (base + rebaseRate) / base;
       await contract.increaseRebaseMultiplier(rebaseRate, expectedTotalSupply);
@@ -245,14 +227,14 @@ describe("YBS Rebasing Token", function () {
 
       await contract.transfer(addr1.address, amount);
 
-      const currentBlockTimestamp = await getBlockTimestamp();
-      await contract.setRebaseMultipliers(base, base, currentBlockTimestamp, totalSupply);
+      const effectTime = await getBlockTimestamp() + 10;
+      await contract.setRebasePeriod(effectTime);
 
       const expectedTotalSupply = totalSupply * (base + rebaseRate) / base;
       await contract.increaseRebaseMultiplier(rebaseRate, expectedTotalSupply);
 
       // Simulate time passing
-      await network.provider.send("evm_increaseTime", [rebasePeriod-1]);
+      await network.provider.send("evm_increaseTime", [9]);
       await network.provider.send("evm_mine")
 
       const afterIncrMult = base * (base + rebaseRate) / base;
@@ -266,6 +248,9 @@ describe("YBS Rebasing Token", function () {
     it("increases multiplier at maxRebaseRate", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
 
+      const effectTime = await getBlockTimestamp() + 10;
+      await contract.setRebasePeriod(effectTime);
+
       const beforeIncrMult = base;
       const afterIncrMult = beforeIncrMult * (base + rebaseRate) / base;
 
@@ -274,7 +259,7 @@ describe("YBS Rebasing Token", function () {
       const expectedTotalSupply = afterIncrMult * totalSupply / base;
       await expect(contract.increaseRebaseMultiplier(rebaseRate, expectedTotalSupply))
         .to.emit(contract, "RebaseMultipliersSet")
-        .withArgs(base, afterIncrMult, 10);
+        .withArgs(base, afterIncrMult, effectTime);
     });
 
     it("reverts when increasing multiplier exceeds maxRebaseRate", async () => {
@@ -310,8 +295,14 @@ describe("YBS Rebasing Token", function () {
       await contract.transfer(addr1.address, amount);
       await contract.blockAccounts([addr1.address]);
 
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
 
+      // Simulate time passing
+      await network.provider.send("evm_increaseTime", [rebasePeriod-1]);
+      await network.provider.send("evm_mine");
+
+      expect(await contract.getActiveMultiplier()).to.equal(afterIncrMult);
       expect(await contract.balanceOf(addr1.address)).to.equal(amount);
     });
 
@@ -324,17 +315,20 @@ describe("YBS Rebasing Token", function () {
       expect(await contract.isAddrBlocked(addr1.address)).to.be.true;
 
       await contract.unblockAccounts([addr1.address]);
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
 
-      const expected = (amount * beforeIncrMult) / base;
+      const expected = (amount * afterIncrMult) / base;
 
+      expect(await contract.getActiveMultiplier()).to.equal(afterIncrMult);
       expect(await contract.balanceOf(addr1.address)).to.equal(expected);
     });
 
     it("account in _blocklistForReceiving should still see balance increase after rebase", async () => {
       const { contract, addr1 } = await loadFixture(deployYBSFixture);
 
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      let effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
       
       await contract.transfer(addr1.address, amount);
       const rebaseShares = await contract.rebaseSharesOf(addr1.address);
@@ -347,21 +341,23 @@ describe("YBS Rebasing Token", function () {
       expect(await contract.fixedSharesOf(addr1.address)).to.equal(fixedShares);
 
       // validate balance should not have changed, rounding error is acceptable.
-      expect(await contract.balanceOf(addr1.address)).to.within(amount-base, amount);
+      expect(await contract.balanceOf(addr1.address)).to.within(amount-wei, amount);
       
-      await contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, 0, afterIncrTotalSupply);
-      
+      effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(newAfterIncrMult, effectTime, newAfterIncrTotalSupply);
+
       // Validate balance should have increased
       expect(await contract.balanceOf(addr1.address)).to.be.greaterThan(amount);
 
-      const expectedBalAfterIncr = (rebaseShares * afterIncrMult) / base;
+      const expectedBalAfterIncr = (rebaseShares * newAfterIncrMult) / base;
       expect(await contract.balanceOf(addr1.address)).to.equal(expectedBalAfterIncr);
     });
 
     it("removing account from _blocklistForReceiving should still see balance increase after rebase", async () => {
       const { contract, addr1 } = await loadFixture(deployYBSFixture);
 
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      let effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
       
       await contract.transfer(addr1.address, amount);
       const rebaseShares = await contract.rebaseSharesOf(addr1.address);
@@ -374,23 +370,25 @@ describe("YBS Rebasing Token", function () {
       expect(await contract.isAddrBlockedForReceiving(addr1.address)).to.be.false;
       expect(await contract.rebaseSharesOf(addr1.address)).to.equal(rebaseShares);
       expect(await contract.fixedSharesOf(addr1.address)).to.equal(fixedShares);
-  
-      await contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, 0, afterIncrTotalSupply);
+
+      effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(newAfterIncrMult, effectTime, newAfterIncrTotalSupply);
       
       // Validate balance should have increased
       expect(await contract.balanceOf(addr1.address)).to.be.greaterThan(amount);
 
-      const expectedBalAfterIncr = (rebaseShares * afterIncrMult) / base;
+      const expectedBalAfterIncr = (rebaseShares * newAfterIncrMult) / base;
       expect(await contract.balanceOf(addr1.address)).to.equal(expectedBalAfterIncr);
     });
 
     it ("account has rebase shares", async () => {
       const { contract, addr1 } = await loadFixture(deployYBSFixture);
       
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
       await contract.transfer(addr1.address, amount);
 
-      const expected = (amount *  base) / beforeIncrMult;
+      const expected = (amount *  base) / afterIncrMult;
 
       expect(await contract.rebaseSharesOf(addr1.address)).to.equal(expected);
       expect(await contract.totalRebaseShares()).to.equal(totalSupply);
@@ -398,22 +396,34 @@ describe("YBS Rebasing Token", function () {
 
     it ("account has fixed shares", async () => {
       const { contract, addr1 } = await loadFixture(deployYBSFixture);
-
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
       await contract.transfer(addr1.address, amount);
       await contract.blockAccounts([addr1.address]); // convert to fixed shares
 
-      const rebaseShares = (amount *  base) / beforeIncrMult;
-      const expectedFixedShares = (rebaseShares *  beforeIncrMult) / base;
+      const rebaseShares = (amount *  base) / afterIncrMult;
+      const expectedFixedShares = (rebaseShares *  afterIncrMult) / base;
 
       expect(await contract.fixedSharesOf(addr1.address)).to.equal(expectedFixedShares);
       expect(await contract.totalFixedShares()).to.equal(expectedFixedShares);
     });
 
+    it("reverts when the transfer amount converts to zero shares", async () => {
+      const { contract, addr1 } = await loadFixture(deployYBSFixture);
+
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
+
+      await expect(contract.transfer(addr1.address, 1))
+        .to.be.revertedWithCustomError(contract, "ZeroSharesFromValue");
+    });
+
     it ("reverts when mint amount converts to zero shares", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
-
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
 
       const mintValue = parseUnits("1", -18);
       await expect(contract.increaseSupply(mintValue))
@@ -423,8 +433,9 @@ describe("YBS Rebasing Token", function () {
 
     it ("reverts when burn amount converts to zero shares", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
-
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
 
       const burnValue = parseUnits("1", -18);
       await expect(contract.decreaseSupply(burnValue))
@@ -438,8 +449,9 @@ describe("YBS Rebasing Token", function () {
       const amount = parseUnits("1", -18);
       await contract.transfer(addr1.address, amount);
       await contract.blockAccounts([addr1.address]); // convert to fixed shares
-
-      await contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, 0, beforeIncrTotalSupply);
+      
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime, afterIncrTotalSupply);
 
       // convert back to rebase shares
       await expect(contract.unblockAccounts([addr1.address]))
@@ -450,17 +462,16 @@ describe("YBS Rebasing Token", function () {
     it("set rebase multiplier and mint before multiplier increase is in progress", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
       const mintValue = parseUnits("10");
-      const beforeIncrMult = parseUnits("2");
-      const afterIncrMult = parseUnits("3");
+      const beforeIncrMult = parseUnits("1");
+      const afterIncrMult = parseUnits("2");
       const expectedActiveMulAfterRebase = calculateAfterIncrMult(totalSupply, beforeIncrMult, afterIncrMult, mintValue);
 
       let currentBlockTimestamp = await getBlockTimestamp();
       let multIncrTime = currentBlockTimestamp + rebasePeriod;
 
-
-      let expectedTotalSupply = 3n * totalSupply; // We are setting the multiplier to 3.
+      let expectedTotalSupply = 2n * totalSupply; // We are setting the multiplier to 2.
       // sets the rebaseMultiplier.
-      await expect(contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, multIncrTime, expectedTotalSupply))
+      await expect(contract.setNextMultiplier(afterIncrMult, multIncrTime, expectedTotalSupply))
         .to.emit(contract, "RebaseMultipliersSet")
         .withArgs(beforeIncrMult, afterIncrMult, multIncrTime);
 
@@ -494,10 +505,8 @@ describe("YBS Rebasing Token", function () {
       let currentBlockTimestamp = await getBlockTimestamp();
       const multIncrTime = currentBlockTimestamp + rebasePeriod;
 
-      // Set default multiplier and time.
-      await expect(contract.setRebaseMultipliers(base, base, currentBlockTimestamp, expectedTotalSupply))
-        .to.emit(contract, "RebaseMultipliersSet")
-        .withArgs(base, base, currentBlockTimestamp);
+      const effectTime = await getBlockTimestamp() + rebasePeriod;
+      await contract.setRebasePeriod(effectTime);
 
       // increase the multiplier from 1 to 2.
       await expect(contract.increaseRebaseMultiplier(base, expectedTotalSupply))
@@ -538,13 +547,13 @@ describe("YBS Rebasing Token", function () {
       const totalRebaseSharesWhenRebaseIsRequested = (totalRebaseShares -  totalRebaseSharesOfBlockedAccounts);
       const expectedActiveMulAfterRebase = calculateAfterIncrMult(totalRebaseSharesWhenRebaseIsRequested, beforeIncrMult, afterIncrMult, blockAccountValue1);
 
-      let currentBlockTimestamp = await getBlockTimestamp();
+      let effectTime = await getBlockTimestamp() + 1;
 
-      // sets all rebase multipliers to beforeIncrMult value.
+      // set next rebase multiplier to beforeIncrMult value.
       let expectedTotalSupply = totalRebaseShares * beforeIncrMult / base;
-      await expect(contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, currentBlockTimestamp, expectedTotalSupply))
+      await expect(contract.setNextMultiplier(beforeIncrMult, effectTime, expectedTotalSupply))
       .to.emit(contract, "RebaseMultipliersSet")
-      .withArgs(beforeIncrMult, beforeIncrMult, currentBlockTimestamp);
+      .withArgs(base, beforeIncrMult, effectTime);
       // setup: fund two accounts and block both of them.
       await contract.transfer(addr2.address, blockAccountValue2);
       await contract.transfer(addr1.address, blockAccountValue1);
@@ -552,7 +561,7 @@ describe("YBS Rebasing Token", function () {
 
       // increasing multiplier by 1 (50% increase)
       const rebaseRate = parseUnits("0.5")
-      const multIncrTime = currentBlockTimestamp + rebasePeriod
+      const multIncrTime = effectTime + rebasePeriod
       expectedTotalSupply = totalRebaseShares * afterIncrMult / base;
       await expect(contract.increaseRebaseMultiplier(rebaseRate, expectedTotalSupply))
         .to.emit(contract, "RebaseMultipliersSet")
@@ -584,10 +593,8 @@ describe("YBS Rebasing Token", function () {
       let currentBlockTimestamp = await getBlockTimestamp();
       const multIncrTime = currentBlockTimestamp + rebasePeriod;
 
-      // Set default multiplier and time.
-      await expect(contract.setRebaseMultipliers(base, base, currentBlockTimestamp, expectedTotalSupply))
-        .to.emit(contract, "RebaseMultipliersSet")
-        .withArgs(base, base, currentBlockTimestamp);
+      const effectTime = await getBlockTimestamp() + rebasePeriod;
+      await contract.setRebasePeriod(effectTime);
 
       // increase the multiplier from 1 to 2.
       await expect(contract.increaseRebaseMultiplier(base, expectedTotalSupply))
@@ -623,19 +630,19 @@ describe("YBS Rebasing Token", function () {
       const totalRebaseShares = parseUnits("123");
       const expectedActiveMulAfterRebase = calculateAfterIncrMult(totalRebaseShares, beforeIncrMult, afterIncrMult, -blockAccountValue);
 
-      let currentBlockTimestamp = await getBlockTimestamp();
+      let effectTime = await getBlockTimestamp() + 1;
 
-      // sets all rebase multipliers to beforeIncrMult value.
+      // sets next rebase multiplier to beforeIncrMult value.
       let expectedTotalSupply = totalRebaseShares * beforeIncrMult / base;
-      await expect(contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, currentBlockTimestamp, expectedTotalSupply))
+      await expect(contract.setNextMultiplier(beforeIncrMult, effectTime, expectedTotalSupply))
       .to.emit(contract, "RebaseMultipliersSet")
-      .withArgs(beforeIncrMult, beforeIncrMult, currentBlockTimestamp);
+      .withArgs(base, beforeIncrMult, effectTime);
       // setup: fund account.
       await contract.transfer(addr1.address, blockAccountValue);
 
       // increasing multiplier by 1 (50% increase)
       const rebaseRate = parseUnits("0.5");
-      const multIncrTime = currentBlockTimestamp + rebasePeriod;
+      const multIncrTime = effectTime + rebasePeriod;
       expectedTotalSupply = totalRebaseShares * afterIncrMult / base;
       await expect(contract.increaseRebaseMultiplier(rebaseRate, expectedTotalSupply))
         .to.emit(contract, "RebaseMultipliersSet")
@@ -661,14 +668,13 @@ describe("YBS Rebasing Token", function () {
     it("afterIncrMult should not change when adding/removing to/from _blocklistForReceiving", async () => {
       const { contract, addr1} = await loadFixture(deployYBSFixture);
 
-      // setup - set the initial multiplier and fund the account to be blocked.
-      const currentBlockTimestamp = await getBlockTimestamp();
-      await expect(contract.setRebaseMultipliers(beforeIncrMult, beforeIncrMult, currentBlockTimestamp, beforeIncrTotalSupply));
+      // setup - fund the account to be blocked.
       await contract.transfer(addr1.address, amount);
 
       // set future multiplier then block account
-      await contract.setRebaseMultipliers(beforeIncrMult, afterIncrMult, currentBlockTimestamp+rebasePeriod, afterIncrTotalSupply);
-      expect (await contract.getActiveMultiplier()).to.equal(beforeIncrMult); // afterIncrMult is not active yet
+      const effectTime = await getBlockTimestamp() + 1;
+      await contract.setNextMultiplier(afterIncrMult, effectTime+rebasePeriod, afterIncrTotalSupply);
+      expect (await contract.getActiveMultiplier()).to.equal(base); // afterIncrMult is not active yet
       contract.blockAccountsFromReceiving([addr1.address]);
 
       // verify the blocking did not change the future multiplier
@@ -695,9 +701,9 @@ describe("YBS Rebasing Token", function () {
         await contract.transfer(address, initBal);
       }
 
-      // set initial rebase multipliers and start time
-      const currentBlockTimestamp = await getBlockTimestamp();
-      await contract.setRebaseMultipliers(base, base, currentBlockTimestamp, totalSupply);
+      // set up so that the first rebase is in the future, then reset the rebase period
+      const effectTime = await getBlockTimestamp() + rebasePeriod;
+      await contract.setRebasePeriod(effectTime);
 
       // Rebase 1
       let expectedTotalSupply = totalSupply * (base + rebaseRate) / base;
@@ -724,6 +730,8 @@ describe("YBS Rebasing Token", function () {
       expect(await contract.totalRebaseShares()).to.equal(expectedRebaseSharesAfterBlock);
 
       // Rebase 2
+      await contract.setRebasePeriod(rebasePeriod); // reset rebase period 
+
       let fixedShares = await contract.totalFixedShares();
       let rebaseShares = await contract.totalRebaseShares();
       let nextMult = (await contract.getActiveMultiplier()) * (base + rebaseRate) / base; 
@@ -755,7 +763,7 @@ describe("YBS Rebasing Token", function () {
 
       // only the unblockAccount call should increase rebase shares
       // Expect to be off by of 1e-18 since converting to rebase shares will round to zero when dividing.
-      expect(await contract.totalSupply()).to.within(expectedTotalSupply-base, expectedTotalSupply);
+      expect(await contract.totalSupply()).to.within(expectedTotalSupply-wei, expectedTotalSupply);
       const unblockedShares = (blockedBal * base) / nextMult;
       const expectedRebaseShares = expectedRebaseSharesAfterBlock + unblockedShares;
       expect(await contract.totalRebaseShares()).to.equal(expectedRebaseShares);
