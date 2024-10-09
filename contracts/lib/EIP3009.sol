@@ -4,6 +4,15 @@ pragma solidity 0.8.17;
 import {PaxosBaseAbstract} from "./PaxosBaseAbstract.sol";
 import {EIP712} from "./EIP712.sol";
 
+/**
+ * @title EIP3009 contract
+ * @dev An abstract contract to provide EIP3009 functionality.
+ * @notice These functions do not prevent replay attacks when an initial 
+ * transaction fails. If conditions change, such as the contract going
+ * from paused to unpaused, an external observer can reuse the data from the 
+ * failed transaction to execute it later.
+ * @custom:security-contact smart-contract-security@paxos.com
+ */
 abstract contract EIP3009 is PaxosBaseAbstract {
     // keccak256("TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
     bytes32 public constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
@@ -29,9 +38,9 @@ abstract contract EIP3009 is PaxosBaseAbstract {
         address indexed authorizer,
         bytes32 indexed nonce
     );
+    event AuthorizationAlreadyUsed(address indexed authorizer, bytes32 indexed nonce);
 
     error CallerMustBePayee();
-    error AuthorizationAlreadyUsed();
     error AuthorizationInvalid();
     error AuthorizationExpired();
     error BlockedAccountAuthorizer();
@@ -198,11 +207,12 @@ abstract contract EIP3009 is PaxosBaseAbstract {
         bytes32 r,
         bytes32 s
     ) external whenNotPaused {
-        if (isAddrBlocked(msg.sender)) revert BlockedAccountSender();
         if (isAddrBlocked(authorizer)) revert BlockedAccountAuthorizer();
 
-        if (_authorizationStates[authorizer][nonce])
-            revert AuthorizationAlreadyUsed();
+        if (_authorizationStates[authorizer][nonce]) {
+            emit AuthorizationAlreadyUsed(authorizer, nonce);
+            return; //Return instead of throwing an error to prevent revert of a complex transaction with authorized inner transactions. Helps preventing the frontrunning tx to cause griefing
+        }
 
         bytes memory data = abi.encode(
             CANCEL_AUTHORIZATION_TYPEHASH,
@@ -242,12 +252,13 @@ abstract contract EIP3009 is PaxosBaseAbstract {
         bytes32 r,
         bytes32 s
     ) internal {
-        if (block.timestamp < validAfter) revert AuthorizationInvalid();
-        if (block.timestamp > validBefore) revert AuthorizationExpired();
+        if (block.timestamp <= validAfter) revert AuthorizationInvalid();
+        if (block.timestamp >= validBefore) revert AuthorizationExpired();
 
-        if (isAddrBlocked(msg.sender)) revert BlockedAccountSpender();
-        if (_authorizationStates[from][nonce])
-            revert AuthorizationAlreadyUsed();
+        if (_authorizationStates[from][nonce]) {
+            emit AuthorizationAlreadyUsed(from, nonce);
+            return; //Return instead of throwing an error to prevent revert of a complex transaction with authorized inner transactions. Helps preventing the frontrunning tx to cause griefing
+        }
 
         bytes memory data = abi.encode(
             typeHash,

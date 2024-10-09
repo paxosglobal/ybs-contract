@@ -11,6 +11,7 @@ import {EIP712} from "./lib/EIP712.sol";
 /**
  * @title YBS contract
  * @dev Yield Bearing Stablecoin is a Pausable ERC20 token where token holders are allowed to earn yield.
+ * @custom:security-contact smart-contract-security@paxos.com
  */
 contract YBS is
     IERC20MetadataUpgradeable,
@@ -64,15 +65,30 @@ contract YBS is
     uint256[35] private __gap_YBS; // solhint-disable-line var-name-mixedcase
 
     // Access control roles
-    // keccak256("SUPPLY_CONTROLLER_ROLE")
+    /**
+     * @dev The role that controls the supply of the token.
+     * Derived from keccak256("SUPPLY_CONTROLLER_ROLE")
+     */
     bytes32 public constant SUPPLY_CONTROLLER_ROLE = 0x9c00d6f280439b1dfa4da90321e0a3f3c2e87280f4d07fea9fa43ff2cf02df2b;
-    // keccak256("PAUSE_ROLE")
+    /**
+     * @dev The role that allows accounts to pause the contract.
+     * Derived from keccak256("PAUSE_ROLE")
+     */
     bytes32 public constant PAUSE_ROLE = 0x139c2898040ef16910dc9f44dc697df79363da767d8bc92f2e310312b816e46d;
-    // keccak256("ASSET_PROTECTION_ROLE")
+    /**
+     * @dev The role that can block accounts and seize assets.
+     * Derived from keccak256("ASSET_PROTECTION_ROLE")
+     */
     bytes32 public constant ASSET_PROTECTION_ROLE = 0xe3e4f9d7569515307c0cdec302af069a93c9e33f325269bac70e6e22465a9796;
-    // keccak256("REBASE_ADMIN_ROLE")
+    /**
+     * @dev The role that can set rebase parameters.
+     * Derived from keccak256("REBASE_ADMIN_ROLE")
+     */
     bytes32 public constant REBASE_ADMIN_ROLE = 0x1def088e742814a6c13355302c4cd95da961f82267b7106f2e38fbc5414a570e;
-    // keccak256("REBASE_ROLE")
+    /**
+     * @dev The role that can increase the rebase multiplier.
+     * Derived from keccak256("REBASE_ROLE")
+     */
     bytes32 public constant REBASE_ROLE = 0x2cb8fee3430f011f8ea5df36a120dd5a293aa25c9ca88cc51159a94f41f768bb;
 
     // Events
@@ -110,6 +126,7 @@ contract YBS is
         uint256 sharesNeeded
     );
     error InvalidRebaseMultiplier(uint256 multiplier);
+    error RetroactiveRebase();
     error InvalidRebaseRate(uint256 rate);
     error InvalidMaxRebaseRate(uint256 value);
     error NextIncreaseAlreadySet();
@@ -154,9 +171,11 @@ contract YBS is
         name = name_;
         symbol = symbol_;
         decimals = decimals_;
+        beforeIncrMult = _BASE;
+        afterIncrMult = _BASE;
+        multIncrTime = 0;
         _setRebasePeriod(0);
         _setMaxRebaseRate(0);
-        _setRebaseMultipliers(_BASE, _BASE, 0, 0);
 
         __AccessControlDefaultAdminRules_init(3 hours, admin);
         __Pausable_init();
@@ -268,20 +287,29 @@ contract YBS is
     }
 
     /**
-     * @notice Sets the rebase multipliers and increase time.
+     * @notice Sets the next rebase multiplier and increase time.
      * @dev Restricted to REBASE_ADMIN_ROLE.
-     * @param beforeIncrMult_ the contract rebase multiplier before increase
+     * Used in the following scenarios:
+     * 1. corrective actions when a pending increase is set, i.e. multIncrTime is in future.
+     *     a. The beforeIncrMult should be active in this case and should not change.
+     * 2. explicitly setting the next multiplier & increase time.
+     *     a. The afterIncrMult should be active in this case and roll to beforeIncrMult.
      * @param afterIncrMult_ the contract rebase multiplier after increase
      * @param multIncrTime_ the multiplier increase time
      * @param expectedTotalSupply the expected total supply after the increase based on afterIncrMult_.
      */
-    function setRebaseMultipliers(
-        uint256 beforeIncrMult_,
+    function setNextMultiplier(
         uint256 afterIncrMult_,
         uint256 multIncrTime_,
         uint256 expectedTotalSupply
     ) external onlyRole(REBASE_ADMIN_ROLE) {
-        _setRebaseMultipliers(beforeIncrMult_, afterIncrMult_, multIncrTime_, expectedTotalSupply);
+        // Do not allow multIncrTime_ to be in the past.
+        // If desired to only increase the multIncrTime use increaseRebaseMultiplier() with a zero rebaseRate.
+        if (multIncrTime_ < block.timestamp) {
+            revert RetroactiveRebase();
+        }
+
+        _setRebaseMultipliers(_getActiveMultiplier(), afterIncrMult_, multIncrTime_, expectedTotalSupply); // 2, 2, 0, any
     }
 
     /**
@@ -294,7 +322,7 @@ contract YBS is
         uint256 rebaseRate,
         uint256 expectedTotalSupply
     ) external onlyRole(REBASE_ROLE) {
-        // Revert if already been set, corrective actions should use setRebaseMultipliers()
+        // Revert if already been set, corrective actions should use setNextMultiplier()
         if (multIncrTime > block.timestamp) {
             revert NextIncreaseAlreadySet();
         }
@@ -303,7 +331,14 @@ contract YBS is
             revert InvalidRebaseRate(rebaseRate);
         }
 
+        // The multIncrTime_ can be in the past only if the multiplier does not change, i.e. rebaseRate == 0. 
+        // This is needed for Operations to rely on the safer function increaseRebaseMultiplier(),
+        // in case the multiplier was not updated for longer than 'rebasePeriod' time.
         uint256 multIncrTime_ = multIncrTime + rebasePeriod;
+        if (multIncrTime_ < block.timestamp && rebaseRate != 0) {
+            revert RetroactiveRebase();
+        }
+
         uint256 afterIncrMult_ = (afterIncrMult * (_BASE + rebaseRate)) / _BASE;
 
         _setRebaseMultipliers(afterIncrMult, afterIncrMult_, multIncrTime_, expectedTotalSupply);
@@ -617,6 +652,8 @@ contract YBS is
         if (_blocklistForReceiving[to]) revert BlockedAccountReceiver();
 
         uint256 shares = _convertToRebaseShares(amount);
+        if (shares == 0) revert ZeroSharesFromValue(amount);
+
         uint256 fromShares = _rebaseShares[from];
         if (shares > fromShares)
             revert ERC20InsufficientBalance(from, fromShares, shares);
@@ -663,9 +700,6 @@ contract YBS is
                                    uint256 afterIncrMult_,
                                    uint256 multIncrTime_,
                                    uint256 expectedTotalSupply) internal {
-        if (beforeIncrMult_ < _BASE ) {
-            revert InvalidRebaseMultiplier(beforeIncrMult_);
-        }
         if (afterIncrMult_ < beforeIncrMult_) {
             revert InvalidRebaseMultiplier(afterIncrMult_);
         }

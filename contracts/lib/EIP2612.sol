@@ -4,6 +4,11 @@ pragma solidity 0.8.17;
 import {PaxosBaseAbstract} from "./PaxosBaseAbstract.sol";
 import {EIP712} from "./EIP712.sol";
 
+/**
+ * @title EIP2612 contract
+ * @dev An abstract contract to provide EIP2612 functionality.
+ * @custom:security-contact smart-contract-security@paxos.com
+ */
 abstract contract EIP2612 is PaxosBaseAbstract {
     // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
     bytes32 public constant PERMIT_TYPEHASH =
@@ -46,6 +51,7 @@ abstract contract EIP2612 is PaxosBaseAbstract {
     ) external whenNotPaused {
         if (deadline < block.timestamp) revert PermitExpired();
         if (isAddrBlocked(owner)) revert BlockedAccountOwner();
+        if (isAddrBlocked(spender)) revert BlockedAccountSpender();
 
         bytes memory data = abi.encode(
             PERMIT_TYPEHASH,

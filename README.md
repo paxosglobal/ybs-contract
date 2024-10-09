@@ -9,30 +9,66 @@ USDL uses the [`YBS`](contracts/YBS.sol) contract and provides yield through a [
 
 ### Roles and Addresses
 
-| Role                   | Address                                    |
-| ---------------------- | ------------------------------------------ |
-| DEFAULT_ADMIN_ROLE     | 0x65bcf790Cb8ADf60D5f54eC2E10DE8C83886E0AE |
-| SUPPLY_CONTROLLER_ROLE | 0xee8557b16a527C5d262FFD7fE0b20c1A47279932 |
-| PAUSE_ROLE             | 0xA54E5d5A4C4011bf4A467b54b0F4505b9Ef7D024 |
-| ASSET_PROTECTION_ROLE  | 0xA54E5d5A4C4011bf4A467b54b0F4505b9Ef7D024 |
-| REBASE_ADMIN_ROLE      | 0x65bcf790Cb8ADf60D5f54eC2E10DE8C83886E0AE |
-| REBASE_ROLE            | 0x8CC7488690f507Ca47c3c673c18DefaBEDC4967B |
+| Role                   | Address - ETH                              | Address - ARB                              |
+| ---------------------- | ------------------------------------------ | ------------------------------------------ |
+| DEFAULT_ADMIN_ROLE     | 0x65bcf790Cb8ADf60D5f54eC2E10DE8C83886E0AE | 0x0E5087e19EB58e28DDF9F341b550BE6797547BF7 |
+| SUPPLY_CONTROLLER_ROLE | 0xee8557b16a527C5d262FFD7fE0b20c1A47279932 | 0x7760d8D840A70B8d4c2E2355cb794A58E7DF438d |
+| PAUSE_ROLE             | 0xA54E5d5A4C4011bf4A467b54b0F4505b9Ef7D024 | 0x31124Ca9b0Da7736c2eD8c223E12929C3fA75c89 |
+| ASSET_PROTECTION_ROLE  | 0xA54E5d5A4C4011bf4A467b54b0F4505b9Ef7D024 | 0x31124Ca9b0Da7736c2eD8c223E12929C3fA75c89 |
+| REBASE_ADMIN_ROLE      | 0x65bcf790Cb8ADf60D5f54eC2E10DE8C83886E0AE | 0x0E5087e19EB58e28DDF9F341b550BE6797547BF7 |
+| REBASE_ROLE            | 0x8CC7488690f507Ca47c3c673c18DefaBEDC4967B | 0xA7d2E38c73A890a15Ee1B42AA345A98b7e99218E |
 
 To guard against centralized control, the addresses above utilize multisignature contracts ([source](https://github.com/paxosglobal/simple-multisig)). Any change requires the presence of a quorum of signers in the same physical location, ensuring that no individual signer can unilaterally influence a change.
 
 ### ABI, Address and Verification
 
-The contract abi is in `YBS.abi`. It is the abi of the implementation contract.
-Interaction with USDL is done at the address of the proxy at `0xbdC7c08592Ee4aa51D06C27Ee23D5087D65aDbcD`. See on
-[etherscan](https://etherscan.io/address/0xbdC7c08592Ee4aa51D06C27Ee23D5087D65aDbcD) for live on-chain details, and the section on bytecode verification below.
+The contract abi is in [`YBS.abi`](YBS.abi). It is the abi of the implementation contract.
 
 ### Bytecode verification
 
 The proxy contract and implementation contracts are verified on etherscan at the following links:
+
+#### Ethereum
 https://etherscan.io/address/0xbdC7c08592Ee4aa51D06C27Ee23D5087D65aDbcD#code
 https://etherscan.io/address/0xFcA4F4d52b92A6839DA57c4d11B9ac2841d8cBA0#code
 
-## Contract Specification
+#### Arbitrum
+https://arbiscan.io/address/0x7f850b0ab1988dd17b69ac564c1e2857949e4dee#code
+https://arbiscan.io/address/0xF393cf22308C3B0dE868ec125834A9F065C11CeC#code
+
+## Wrapped Lift Dollar (wUSDL) 
+
+wUSDL is a wrapped version of Lift Dollar (USDL), designed to offer a fixed, non-rebasing balance for users who wish to avoid fluctuations in token supply. Unlike USDL, which adjusts its supply dynamically through rebasing to maintain price stability, wUSDL retains a static balance after minting. This makes wUSDL ideal for use cases where a predictable token balance is required, such as DeFi protocols or trading collateral.
+
+wUSDL uses the [`wYBS.sol`](contracts/wYBS.sol) contract, which is an upgradable token that the implements ERC-20 and ERC-4626 standards.
+
+### Roles and Addresses
+
+| Role                   | Address - ETH                              | Address - ARB                              |
+| ---------------------- | ------------------------------------------ | ------------------------------------------ |
+| DEFAULT_ADMIN_ROLE     | 0x60Be07b68214d49aF3Ec8fa89c7fc0970De0A94E | 0x501adc5dfbf329175f9c8f036b523cc720d0f9e5 |
+| PAUSE_ROLE             | 0x6E8cc2Bd8B19ABB4C72B103Ab87078A1aCcA194D | 0x468ce3aaf4e0e0ad02cc526300c3af6ff4af09a7 |
+| ASSET_PROTECTION_ROLE  | 0x6E8cc2Bd8B19ABB4C72B103Ab87078A1aCcA194D | 0x468ce3aaf4e0e0ad02cc526300c3af6ff4af09a7 |
+
+To guard against centralized control, the addresses above utilize multisignature contracts ([source](https://github.com/paxosglobal/simple-multisig)). Any change requires the presence of a quorum of signers in the same physical location, ensuring that no individual signer can unilaterally influence a change.
+
+### ABI, Address and Verification
+
+The contract abi is in [`wYBS.abi`](wYBS.abi). It is the abi of the implementation contract.
+
+### Bytecode verification
+
+The proxy contract and implementation contracts are verified on etherscan at the following links:
+
+#### Ethereum
+https://etherscan.io/address/0x7751E2F4b8ae93EF6B79d86419d42FE3295A4559#code
+https://etherscan.io/address/0x2954C85E7e2B841d0e9A9fdcC09Dac1274057D71#code
+
+#### Arbitrum
+https://arbiscan.io/address/0x7751e2f4b8ae93ef6b79d86419d42fe3295a4559#code
+https://arbiscan.io/address/0x2954c85e7e2b841d0e9a9fdcc09dac1274057d71#code
+
+## YBS Contract Specification
 
 [`YBS.sol`](contracts/YBS.sol) contract is a rebasing token that implements the ERC20 standard.
 
@@ -45,7 +81,7 @@ does not store token balances, instead it stores rebaseShares for accounts.
 Rebasing is performed by the `REBASE_ROLE` through `increaseRebaseMultiplier()`.
 
 The `REBASE_ADMIN_ROLE` has the power to call all rebasing administrative functions, including:
-- `setRebaseMultipliers()` : Fail-safe function to protect against multiplier misconfiguration.
+- `setNextMultiplier()` : Fail-safe function to protect against multiplier misconfiguration.
 - `setRebasePeriod()` : Sets the period at which rebasing occurs, protects against multiple increases within a rebase period.
 - `setMaxRebaseRate()` : Sets the upper bound on multiplier increases, protects against larger than expected increases.
 

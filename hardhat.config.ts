@@ -12,7 +12,8 @@ dotenv.config();
 const {
   PRIVATE_KEY,
   INFURA_API_KEY,
-  ETHERSCAN_API_KEY
+  ETHERSCAN_API_KEY,
+  ARBISCAN_API_KEY
 } = process.env;
 
 const config: HardhatUserConfig = {
@@ -27,8 +28,20 @@ const config: HardhatUserConfig = {
   },
   defaultNetwork: 'hardhat',
   networks: {
-    ethSepolia: {
+    mainnet: {
+      url: "https://mainnet.infura.io/v3/" + INFURA_API_KEY,
+      ...(PRIVATE_KEY ? { accounts: [PRIVATE_KEY] } : {}),
+    },
+    sepolia: {
       url: "https://sepolia.infura.io/v3/" + INFURA_API_KEY,
+      ...(PRIVATE_KEY ? { accounts: [PRIVATE_KEY] } : {}),
+    },
+    arbitrumOne: {
+      url: "https://arbitrum-mainnet.infura.io/v3/" + INFURA_API_KEY,
+      ...(PRIVATE_KEY ? { accounts: [PRIVATE_KEY] } : {}),
+    },
+    arbitrumSepolia: {
+      url: "https://arbitrum-sepolia.infura.io/v3/" + INFURA_API_KEY,
       ...(PRIVATE_KEY ? { accounts: [PRIVATE_KEY] } : {}),
     },
     polygonMainnet: {
@@ -48,7 +61,12 @@ const config: HardhatUserConfig = {
     enabled: (process.env.GAS_REPORTER) ? true : false
   },
   etherscan: {
-    apiKey: ETHERSCAN_API_KEY,
+    apiKey: {
+      mainnet: ETHERSCAN_API_KEY,
+      sepolia: ETHERSCAN_API_KEY,
+      arbitrumOne: ARBISCAN_API_KEY,
+      arbitrumSepolia: ARBISCAN_API_KEY,
+    },
   },
 };
 

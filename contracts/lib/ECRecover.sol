@@ -3,10 +3,10 @@ pragma solidity 0.8.17;
 
 /**
  * @title A library that provides a safe ECDSA recovery function
+ * @custom:security-contact smart-contract-security@paxos.com
  */
 library ECRecover {
     error InvalidValueS();
-    error InvalidValueV();
     error InvalidSignature();
 
     /**
@@ -39,10 +39,6 @@ library ECRecover {
             0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
         ) {
             revert InvalidValueS();
-        }
-
-        if (v != 27 && v != 28) {
-            revert InvalidValueV();
         }
 
         // If the signature is valid (and not malleable), return the signer address
