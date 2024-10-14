@@ -309,7 +309,7 @@ contract YBS is
             revert RetroactiveRebase();
         }
 
-        _setRebaseMultipliers(_getActiveMultiplier(), afterIncrMult_, multIncrTime_, expectedTotalSupply); // 2, 2, 0, any
+        _setRebaseMultipliers(_getActiveMultiplier(), afterIncrMult_, multIncrTime_, expectedTotalSupply);
     }
 
     /**
