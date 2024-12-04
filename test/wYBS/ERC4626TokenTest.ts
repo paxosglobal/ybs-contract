@@ -36,6 +36,7 @@ describe("wYBS ERC4626", function () {
     it("share amount doesn't increase with rebase", async function () {
       await contract.deposit(initialAmount, addr1.address)
       expect(await contract.balanceOf(addr1.address)).to.be.equal(initialAmount);
+      await ybsContract.setMaxRebaseRate(parseUnits("1"));
 
       let currentBlockTimestamp = await getBlockTimestamp();
       const afterIncrMult = parseUnits("1.5");
@@ -52,6 +53,7 @@ describe("wYBS ERC4626", function () {
     it("redeem after rebase", async function () {
       await contract.deposit(initialAmount, addr1.address)
       expect(await contract.balanceOf(addr1.address)).to.be.equal(initialAmount);
+      await ybsContract.setMaxRebaseRate(parseUnits("1"));
 
       let currentBlockTimestamp = await getBlockTimestamp();
       const afterIncrMult = parseUnits("1.5");

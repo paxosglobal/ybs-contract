@@ -5,7 +5,7 @@ Paxos International-issued USD-collateralized ERC20 yield-bearing stablecoin pub
 ## Lift Dollar (USDL) 
 
 Lift Dollar (USDL) is an ERC20 token that is centrally minted and burned by Paxos Issuance MENA Ltd. ("Paxos International"), representing the trusted party backing the token with USD.
-USDL uses the [`YBS`](contracts/YBS.sol) contract and provides yield through a [rebasing mechanism](#Rebasing). Rebasing, the act of distributing yield, will occur daily. Over time, qualified token holders will see their balance increase as a result of rebasing.
+USDL uses the [`YBSV1_1`](contracts/YBSV1_1.sol) contract and provides yield through a [rebasing mechanism](#Rebasing). Rebasing, the act of distributing yield, will occur daily. Over time, qualified token holders will see their balance increase as a result of rebasing.
 
 ### Roles and Addresses
 
@@ -40,7 +40,7 @@ https://arbiscan.io/address/0xF393cf22308C3B0dE868ec125834A9F065C11CeC#code
 
 wUSDL is a wrapped version of Lift Dollar (USDL), designed to offer a fixed, non-rebasing balance for users who wish to avoid fluctuations in token supply. Unlike USDL, which adjusts its supply dynamically through rebasing to maintain price stability, wUSDL retains a static balance after minting. This makes wUSDL ideal for use cases where a predictable token balance is required, such as DeFi protocols or trading collateral.
 
-wUSDL uses the [`wYBS.sol`](contracts/wYBS.sol) contract, which is an upgradable token that the implements ERC-20 and ERC-4626 standards.
+wUSDL uses the [`wYBSV1.sol`](contracts/wYBSV1.sol) contract, which is an upgradable token that the implements ERC-20 and ERC-4626 standards.
 
 ### Roles and Addresses
 
@@ -70,7 +70,7 @@ https://arbiscan.io/address/0x2954c85e7e2b841d0e9a9fdcc09dac1274057d71#code
 
 ## YBS Contract Specification
 
-[`YBS.sol`](contracts/YBS.sol) contract is a rebasing token that implements the ERC20 standard.
+[`YBSV1_1.sol`](contracts/YBSV1_1.sol) contract is a rebasing token that implements the ERC20 standard.
 
 ### Rebasing
 

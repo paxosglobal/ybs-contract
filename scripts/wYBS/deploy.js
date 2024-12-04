@@ -1,6 +1,6 @@
 const { ethers, upgrades } = require("hardhat");
 const { getImplementationAddress } = require('@openzeppelin/upgrades-core');
-const { ValidateInitializerArgs } = require('../utils/helpers');
+const { validateEnvironmentVariables } = require('../utils/helpers');
 
 require("dotenv").config();
 
@@ -16,7 +16,7 @@ const initializerArgs = [
 ];
 
 const main = async () => {
-  ValidateInitializerArgs(initializerArgs);
+  validateEnvironmentVariables(initializerArgs);
 
   const [deployer] = await ethers.getSigners();
 

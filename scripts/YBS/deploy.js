@@ -1,6 +1,6 @@
 const { ethers, upgrades } = require("hardhat");
 const { getImplementationAddress } = require('@openzeppelin/upgrades-core');
-const { ValidateInitializerArgs } = require('../utils/helpers');
+const { validateEnvironmentVariables } = require('../utils/helpers');
 
 require("dotenv").config();
 
@@ -20,7 +20,7 @@ const initializerArgs = [
 ];
 
 const main = async () => {
-  ValidateInitializerArgs(initializerArgs);
+  validateEnvironmentVariables(initializerArgs);
 
   const [deployer] = await ethers.getSigners();
 
@@ -31,7 +31,7 @@ const main = async () => {
 
   console.log("\nDeploying the contract...")
 
-  const contractFactory = await ethers.getContractFactory('YBSV1');
+  const contractFactory = await ethers.getContractFactory('YBSV1_1');
   const contract = await upgrades.deployProxy(contractFactory, initializerArgs, {
     initializer: 'initialize',
     kind: 'uups',

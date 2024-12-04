@@ -340,6 +340,7 @@ describe("YBS Access Controlled Token", function () {
       const { contract, addr1 } = await loadFixture(deployYBSFixture);
       const nextMult = parseUnits("1.0001");
       await contract.grantRole(roles.REBASE_ADMIN_ROLE, addr1.address);
+      await contract.setMaxRebaseRate(parseUnits("1"));
 
       await expect(
         (contract.connect(addr1) as Contract).setNextMultiplier(nextMult, MaxUint256, parseUnits("99"))).to.not.be.reverted;
@@ -391,7 +392,7 @@ describe("YBS Access Controlled Token", function () {
   describe("default admin role", function () {
     it("can upgrade with admin role", async () => {
       const { contract } = await loadFixture(deployYBSFixture);
-      const newContract = await ethers.deployContract("YBS");
+      const newContract = await ethers.deployContract("YBSV1_1");
 
       await expect(contract.upgradeTo(newContract)).to.not.be.reverted;
     });

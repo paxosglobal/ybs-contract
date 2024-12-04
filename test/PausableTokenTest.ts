@@ -1,5 +1,4 @@
 import { expect } from "chai";
-import { ethers, upgrades } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 import { deployYBSFixture } from "./helpers/fixtures";
