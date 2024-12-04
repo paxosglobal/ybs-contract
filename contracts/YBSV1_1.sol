@@ -13,7 +13,7 @@ import {EIP712} from "./lib/EIP712.sol";
  * @dev Yield Bearing Stablecoin is a Pausable ERC20 token where token holders are allowed to earn yield.
  * @custom:security-contact smart-contract-security@paxos.com
  */
-contract YBS is
+contract YBSV1_1 is
     IERC20MetadataUpgradeable,
     AccessControlDefaultAdminRulesUpgradeable,
     UUPSUpgradeable,
@@ -90,6 +90,11 @@ contract YBS is
      * Derived from keccak256("REBASE_ROLE")
      */
     bytes32 public constant REBASE_ROLE = 0x2cb8fee3430f011f8ea5df36a120dd5a293aa25c9ca88cc51159a94f41f768bb;
+    /**
+     * @dev The wrapped YBS contract
+     * Derived from keccak256("WRAPPED_YBS_ROLE")
+     */
+    bytes32 public constant WRAPPED_YBS_ROLE = 0x0d6cd32288790d7ef9cfeeb647381d8116dbc309cfa95f50cbb9e1956d87eb44;
 
     // Events
     event AccountBlocked(address indexed account);
@@ -133,6 +138,13 @@ contract YBS is
     error UnexpectedTotalSupply();
     error ZeroSharesFromValue(uint256 value);
     error ZeroAddress();
+    error WYBSTransferNotAllowed();
+    error CannotChangeRebaseSharesWithPendingMultiplier();
+
+    modifier whenNoPendingMultiplier() {
+        if (block.timestamp < multIncrTime && beforeIncrMult != afterIncrMult) revert CannotChangeRebaseSharesWithPendingMultiplier();
+        _;
+    }
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -209,6 +221,10 @@ contract YBS is
     /**
      * @notice Batch block accounts.
      * @dev Restricted to ASSET_PROTECTION_ROLE.
+     * This function intentionally does not include the whenNoPendingMultiplier() modifier
+     * since blocking accounts is a critical operation and should not be delayed.
+     * As a result, the overall payout amount would be less than originally expected
+     * for a pending multiplier since the blocked accounts would not receive the payout.
      * @param addresses list of addresses to block.
      */
     function blockAccounts(
@@ -242,7 +258,7 @@ contract YBS is
      */
     function unblockAccounts(
         address[] calldata addresses
-    ) external onlyRole(ASSET_PROTECTION_ROLE) {
+    ) external onlyRole(ASSET_PROTECTION_ROLE) whenNoPendingMultiplier() {
         for (uint256 i = 0; i < addresses.length;) {
             _unblockAccount(addresses[i]);
             unchecked { ++i; }
@@ -309,7 +325,17 @@ contract YBS is
             revert RetroactiveRebase();
         }
 
-        _setRebaseMultipliers(_getActiveMultiplier(), afterIncrMult_, multIncrTime_, expectedTotalSupply);
+        uint256 activeMult = _getActiveMultiplier();
+        if (afterIncrMult_ < activeMult) {
+            revert InvalidRebaseMultiplier(afterIncrMult_);
+        }
+
+        uint256 rebaseRate = (afterIncrMult_ - activeMult) * _BASE / activeMult;
+        if (rebaseRate > maxRebaseRate) {
+            revert InvalidRebaseRate(rebaseRate);
+        }
+
+        _setRebaseMultipliers(activeMult, afterIncrMult_, multIncrTime_, expectedTotalSupply);
     }
 
     /**
@@ -427,16 +453,13 @@ contract YBS is
      */
     function increaseSupply(
         uint256 value
-    ) public onlyRole(SUPPLY_CONTROLLER_ROLE) returns (bool success) {
+    ) public onlyRole(SUPPLY_CONTROLLER_ROLE) whenNoPendingMultiplier() returns (bool success) {
         // Do not allow blocked address to get rebaseShares. This check is only necessary for increaseSupply,
         // as decreaseSupply will revert due to insufficient rebaseShares.
         if (_blocklist[msg.sender]) revert BlockedAccountSender();
 
         uint256 shares = _convertToRebaseShares(value);
         if (shares == 0) revert ZeroSharesFromValue(value);
-
-        // An increase in rebaseShares should also update the afterIncrMult_, if required.
-        _updateAfterIncrMultIfRequired(value, true);
 
         totalRebaseShares += shares;
 
@@ -461,16 +484,13 @@ contract YBS is
      */
     function decreaseSupply(
         uint256 value
-    ) public onlyRole(SUPPLY_CONTROLLER_ROLE) returns (bool success) {
+    ) public onlyRole(SUPPLY_CONTROLLER_ROLE) whenNoPendingMultiplier() returns (bool success) {
         uint256 shares = _convertToRebaseShares(value);
         if (shares == 0) revert ZeroSharesFromValue(value);
 
         uint256 hasShares = _rebaseShares[msg.sender];
         if (shares > hasShares)
             revert InsufficientSupply(msg.sender, hasShares, shares);
-
-        // Decrease in rebaseShares should also update the afterIncrMult_, if required.
-        _updateAfterIncrMultIfRequired(value, false);
 
         unchecked {
             // Cannot underflow, shares must be less than or equal to hasShares to get here
@@ -650,6 +670,9 @@ contract YBS is
         if (_blocklist[from]) revert BlockedAccountSender();
         if (_blocklist[to]) revert BlockedAccountReceiver();
         if (_blocklistForReceiving[to]) revert BlockedAccountReceiver();
+        
+        // To prevent inflation attacks on the wYBS contract, block direct transfers.
+        if (hasRole(WRAPPED_YBS_ROLE, to) && (!hasRole(WRAPPED_YBS_ROLE, msg.sender) || hasRole(WRAPPED_YBS_ROLE, from))) revert WYBSTransferNotAllowed();
 
         uint256 shares = _convertToRebaseShares(amount);
         if (shares == 0) revert ZeroSharesFromValue(amount);
@@ -691,6 +714,7 @@ contract YBS is
 
     /**
      * @dev Internal function to set the rebase multipliers and increase time.
+     * Note: this function assumes after mult is greater than or equal to before mult.
      * @param beforeIncrMult_ The new rebase multiplier before increase.
      * @param afterIncrMult_ The new rebase multiplier after increase.
      * @param multIncrTime_ The rebase multiplier increase time.
@@ -700,9 +724,6 @@ contract YBS is
                                    uint256 afterIncrMult_,
                                    uint256 multIncrTime_,
                                    uint256 expectedTotalSupply) internal {
-        if (afterIncrMult_ < beforeIncrMult_) {
-            revert InvalidRebaseMultiplier(afterIncrMult_);
-        }
         if ((totalRebaseShares * afterIncrMult_ / _BASE ) + totalFixedShares > expectedTotalSupply) {
             revert UnexpectedTotalSupply();
         }
@@ -767,9 +788,6 @@ contract YBS is
         uint256 shares = _rebaseShares[account];
         uint256 amount = _convertRebaseSharesToTokens(shares);
 
-        // Decrease in rebaseShares should also update the afterIncrMult_, if required.
-        _updateAfterIncrMultIfRequired(amount, false);
-
         delete _rebaseShares[account];
         unchecked{
             totalRebaseShares -= shares;
@@ -790,14 +808,10 @@ contract YBS is
         uint256 shares = _convertToRebaseShares(amount);
         if (shares == 0) revert ZeroSharesFromValue(amount);
 
-        // An increase in rebaseShares should also update the afterIncrMult_, if required.
-        _updateAfterIncrMultIfRequired(amount, true);
-
         delete _fixedShares[account];
         unchecked {
             totalFixedShares -= amount;
         }
-
 
         _rebaseShares[account] += shares;
         totalRebaseShares += shares;
@@ -882,42 +896,5 @@ contract YBS is
         }
 
         _transfer(from, to, value);
-    }
-
-    /*
-     * @dev Private function which updates the afterIncrMult_ if supply
-     * of rebase shares has increased and rebase multiplier increase
-     * is in progress.
-     * @param value The token value of increased rebase shares.
-     * @param isValueIncremented Boolean to identify if the token value of rebase shares increased or decreased.
-     */
-    function _updateAfterIncrMultIfRequired(
-        uint256 value,
-        bool isValueIncremented
-    ) private {
-        // Update future multiplier if rebase increase in progress
-        if (block.timestamp >= multIncrTime) {
-            return;
-        }
-
-        /* 
-        * Calculation of the new multiplier
-        * intValue = if (isValueIncremented) { value } else { -value }
-        * after_incr_future_total_supply = (total_rebase_shares * (after_incr_multiplier)) + intValue
-        * before_incr_total_supply = (total_rebase_shares * (before_incr_multiplier)) + intValue
-        * updated_multiplier = (after_incr_future_total_supply * before_incr_multiplier) /
-        *                       before_incr_total_supply
-        */
-        if (isValueIncremented) {
-            afterIncrMult =
-                (((totalRebaseShares * afterIncrMult) + (value * _BASE)) * beforeIncrMult) /
-                (((totalRebaseShares * beforeIncrMult) + (value * _BASE)));
-        } else {
-            afterIncrMult =
-                (((totalRebaseShares * afterIncrMult) - (value * _BASE)) * beforeIncrMult) /
-                (((totalRebaseShares * beforeIncrMult) - (value * _BASE)));
-        }
-
-        emit RebaseMultipliersSet(beforeIncrMult, afterIncrMult, multIncrTime);
     }
 }
