@@ -13,7 +13,8 @@ const {
   PRIVATE_KEY,
   INFURA_API_KEY,
   ETHERSCAN_API_KEY,
-  ARBISCAN_API_KEY
+  ARBISCAN_API_KEY,
+  FORK_RPC_URL
 } = process.env;
 
 const config: HardhatUserConfig = {
@@ -28,6 +29,11 @@ const config: HardhatUserConfig = {
   },
   defaultNetwork: 'hardhat',
   networks: {
+    hardhat: {
+      forking: {
+        url: FORK_RPC_URL || "",
+      },
+    },
     mainnet: {
       url: "https://mainnet.infura.io/v3/" + INFURA_API_KEY,
       ...(PRIVATE_KEY ? { accounts: [PRIVATE_KEY] } : {}),

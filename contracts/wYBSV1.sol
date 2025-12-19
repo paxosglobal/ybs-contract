@@ -282,7 +282,7 @@ contract wYBSV1 is
      * @param assets The amount of assets to be deposited.
      * @param shares The amount of shares to be minted.
      */
-    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override {
         if (_blocklist[caller]) revert BlockedAccountSender();
 
         super._deposit(caller, receiver, assets, shares);
@@ -302,7 +302,7 @@ contract wYBSV1 is
         address owner,
         uint256 assets,
         uint256 shares
-    ) internal override {
+    ) internal virtual override {
         if (_blocklist[receiver]) revert BlockedAccountReceiver();
         if (_blocklist[caller]) revert BlockedAccountSpender();
 
